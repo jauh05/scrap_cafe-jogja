@@ -102,13 +102,11 @@ def run_research_scraper(queries, max_cafes=300, reviews_per_cafe=50):
                     print(f"☕ [{cafe_id}] {name} berhasil didata.")
 
                     # 2. Masuk ke Tab Review (TABLE 2)
-                    review_tab = page.locator('[role="tab"]:has-text("Reviews")').first
-                    if review_tab.count() == 0:
-                        review_tab = page.locator('[role="tab"]:has-text("Ulasan")').first
-                        
+                    review_tab = page.locator('button:has-text("Reviews"), button:has-text("Ulasan"), [role="tab"]:has-text("Reviews"), [role="tab"]:has-text("Ulasan")').first
+                    
                     if review_tab.count() > 0:
                         review_tab.click()
-                        page.wait_for_timeout(3000)
+                        page.wait_for_timeout(5000)
                     else:
                         review_btn = page.locator('button[aria-label*="reviews"]').first
                         if review_btn.count() == 0:
@@ -145,11 +143,8 @@ def run_research_scraper(queries, max_cafes=300, reviews_per_cafe=50):
                     for rev in raw_reviews:
                         if extracted_this_cafe >= reviews_per_cafe: break
                         
-                        rev_text_el = rev.locator('.wiI7pd')
-                        if rev_text_el.count() == 0: rev_text_el = rev.locator('.wi9C4c')
-                        if rev_text_el.count() == 0: rev_text_el = rev.locator('.MyEned')
-                        
-                        rev_text_raw = rev_text_el.first.inner_text() if rev_text_el.count() > 0 else ""
+                        rev_texts = rev.locator('.wiI7pd, .wi9C4c, .MyEned').all_inner_texts()
+                        rev_text_raw = max(rev_texts, key=len) if rev_texts else ""
                         rev_text = " ".join(rev_text_raw.split())
                         
                         if len(rev_text) < 10: continue
@@ -213,7 +208,7 @@ if __name__ == "__main__":
         "coffee shop depok sleman"
     ]
     
-    # Jalankan Scraper (Target: 1 Cafe, @ 20 Review per cafe)
-    print("\n⚠️ MENJALANKAN MODE PERCOBAAN (TESTING 1 CAFE - 20 REVIEWS)...")
-    c, r, a = run_research_scraper(queries, max_cafes=1, reviews_per_cafe=20)
+    # Jalankan Scraper (Target: 3 Cafe, @ 20 Review per cafe)
+    print("\n⚠️ MENJALANKAN MODE PERCOBAAN (TESTING 3 CAFE - 20 REVIEWS)...")
+    c, r, a = run_research_scraper(queries, max_cafes=3, reviews_per_cafe=20)
     save_research_dataset(c, r, a)
