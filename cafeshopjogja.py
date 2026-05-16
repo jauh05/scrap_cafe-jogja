@@ -131,7 +131,8 @@ def run_research_scraper(queries, max_cafes=300, reviews_per_cafe=50):
                             page.wait_for_timeout(1000)
                     
                     # EKSTRAKSI REVIEW ITEM
-                    more_btns = page.locator('button:has-text("More")').all() + page.locator('button:has-text("Lainnya")').all()
+                    # Klik tombol "More" (class .w8nwRe.kyuRq sering digunakan Google Maps)
+                    more_btns = page.locator('button.w8nwRe.kyuRq').all() + page.locator('button:has-text("More")').all()
                     for btn in more_btns:
                         try: btn.click(); page.wait_for_timeout(300)
                         except: pass
@@ -144,7 +145,8 @@ def run_research_scraper(queries, max_cafes=300, reviews_per_cafe=50):
                     for rev in raw_reviews:
                         if extracted_this_cafe >= reviews_per_cafe: break
                         
-                        rev_text_el = rev.locator('.wi9C4c')
+                        rev_text_el = rev.locator('.wiI7pd')
+                        if rev_text_el.count() == 0: rev_text_el = rev.locator('.wi9C4c')
                         if rev_text_el.count() == 0: rev_text_el = rev.locator('.MyEned')
                         
                         rev_text_raw = rev_text_el.first.inner_text() if rev_text_el.count() > 0 else ""
