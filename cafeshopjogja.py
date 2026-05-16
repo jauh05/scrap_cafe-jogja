@@ -102,87 +102,76 @@ def run_research_scraper(queries, max_cafes=300, reviews_per_cafe=50):
                     print(f"☕ [{cafe_id}] {name} berhasil didata.")
 
                     # 2. Masuk ke Tab Review (TABLE 2)
-                    # Karena URL di set ke ?hl=en, tab akan berbahasa Inggris "Reviews"
                     review_tab = page.locator('[role="tab"]:has-text("Reviews")').first
                     if review_tab.count() == 0:
                         review_tab = page.locator('[role="tab"]:has-text("Ulasan")').first
                         
                     if review_tab.count() > 0:
                         review_tab.click()
-                        page.wait_for_timeout(3000) # Tunggu loading tab review
+                        page.wait_for_timeout(3000)
                     else:
-                        # Fallback: Terkadang Google Maps tidak punya tab 'Reviews',
-                        # tapi punya tombol ber-label '... reviews' di halaman ringkasan.
                         review_btn = page.locator('button[aria-label*="reviews"]').first
                         if review_btn.count() == 0:
                             review_btn = page.locator('button[aria-label*="ulasan"]').first
                         if review_btn.count() > 0:
                             review_btn.click()
                             page.wait_for_timeout(3000)
-                        
-                        
-                    # LOGIKA SCROLLING YANG LEBIH PASTI: 
-                    # Cari review terakhir dan paksa browser scroll ke elemen tersebut
-                    for _ in range(8): # Lakukan scroll beberapa kali
+                            
+                    # LOGIKA SCROLLING
+                    for _ in range(8): 
                         reviews = page.locator('div[data-review-id]')
                         if reviews.count() > 0:
                             try:
                                 reviews.last.scroll_into_view_if_needed()
                                 page.wait_for_timeout(1500)
-                            except:
-                                pass
+                            except: pass
                         else:
-                            # Fallback scroll dengan mouse jika selector ID tidak ketemu
                             page.mouse.move(300, 400) 
                             page.mouse.wheel(0, 5000)
                             page.wait_for_timeout(1000)
-                        
-                        # Klik tombol "More" / "Lainnya" untuk ekspansi text review yang panjang
-                        more_btns = page.locator('button:has-text("More")').all() + page.locator('button:has-text("Lainnya")').all()
-                        for btn in more_btns:
-                            try: btn.click(); page.wait_for_timeout(300)
-                            except: pass
+                    
+                    # EKSTRAKSI REVIEW ITEM
+                    more_btns = page.locator('button:has-text("More")').all() + page.locator('button:has-text("Lainnya")').all()
+                    for btn in more_btns:
+                        try: btn.click(); page.wait_for_timeout(300)
+                        except: pass
 
-                        # Ekstraksi review item
-                        raw_reviews = page.locator('div[data-review-id]').all()
-                        if not raw_reviews:
-                            raw_reviews = page.locator('.jftiEf').all() # Fallback class Google Maps
-                            
-                        extracted_this_cafe = 0
-                        for rev in raw_reviews:
-                            if extracted_this_cafe >= reviews_per_cafe: break
-                            
-                            # Ekstrak text
-                            rev_text_el = rev.locator('.wi9C4c')
-                            if rev_text_el.count() == 0: rev_text_el = rev.locator('.MyEned')
-                            
-                            rev_text = rev_text_el.first.inner_text() if rev_text_el.count() > 0 else ""
-                            if len(rev_text) < 10: continue # Skip review kosong
-                            
-                            # Ekstraksi rating
-                            stars_el = rev.locator('span[role="img"]').first
-                            star_text = stars_el.get_attribute('aria-label') if stars_el.count() > 0 else ""
-                            user_rating = 5
-                            if star_text:
-                                try:
-                                    user_rating = int(''.join(filter(str.isdigit, star_text.split()[0])))
-                                except: pass
-                            
-                            rev_id = f"RV{len(reviews_data)+1:06d}"
-                            rev_entry = {
-                                "review_id": rev_id, "cafe_id": cafe_id, "review_text": rev_text,
-                                "review_rating": user_rating, "review_date": datetime.now().strftime("%Y-%m-%d"), "language": "id"
-                            }
-                            reviews_data.append(rev_entry)
-                            extracted_this_cafe += 1
-                            
-                            # 3. Ekstraksi Aspek ABSA
-                            absa_labels = extract_absa_labels(rev_text, rev_id)
-                            absa_data.extend(absa_labels)
-                            
-                        print(f"   => Terambil {extracted_this_cafe} review untuk cafe ini.")
-                    else:
-                        print("   => ⚠️ Tab Review tidak ditemukan.")
+                    raw_reviews = page.locator('div[data-review-id]').all()
+                    if not raw_reviews:
+                        raw_reviews = page.locator('.jftiEf').all()
+                        
+                    extracted_this_cafe = 0
+                    for rev in raw_reviews:
+                        if extracted_this_cafe >= reviews_per_cafe: break
+                        
+                        rev_text_el = rev.locator('.wi9C4c')
+                        if rev_text_el.count() == 0: rev_text_el = rev.locator('.MyEned')
+                        
+                        rev_text_raw = rev_text_el.first.inner_text() if rev_text_el.count() > 0 else ""
+                        rev_text = " ".join(rev_text_raw.split())
+                        
+                        if len(rev_text) < 10: continue
+                        
+                        stars_el = rev.locator('span[role="img"]').first
+                        star_text = stars_el.get_attribute('aria-label') if stars_el.count() > 0 else ""
+                        user_rating = 5
+                        if star_text:
+                            try:
+                                user_rating = int(''.join(filter(str.isdigit, star_text.split()[0])))
+                            except: pass
+                        
+                        rev_id = f"RV{len(reviews_data)+1:06d}"
+                        rev_entry = {
+                            "review_id": rev_id, "cafe_id": cafe_id, "review_text": rev_text,
+                            "review_rating": user_rating, "review_date": datetime.now().strftime("%Y-%m-%d"), "language": "id"
+                        }
+                        reviews_data.append(rev_entry)
+                        extracted_this_cafe += 1
+                        
+                        absa_labels = extract_absa_labels(rev_text, rev_id)
+                        absa_data.extend(absa_labels)
+                        
+                    print(f"   => Terambil {extracted_this_cafe} review untuk cafe ini.")
 
                     cafe_count += 1
                 except Exception as e: 
@@ -199,16 +188,18 @@ def save_research_dataset(cafes, reviews, absa):
     print("\n💾 Menyimpan Dataset Penelitian...")
     df1, df2, df3 = pd.DataFrame(cafes), pd.DataFrame(reviews), pd.DataFrame(absa)
     
+    # Simpan CSV
     df1.to_csv('dataset/processed/coffee_shops.csv', index=False)
     if len(df2) > 0: df2.to_csv('dataset/processed/reviews_clean.csv', index=False)
     if len(df3) > 0: df3.to_csv('dataset/processed/absa_labels.csv', index=False)
     
-    with pd.ExcelWriter('dataset/processed/RESEARCH_DATASET_FINAL.xlsx') as writer:
-        df1.to_excel(writer, sheet_name='1_Coffee_Shops', index=False)
-        if len(df2) > 0: df2.to_excel(writer, sheet_name='2_Reviews_NLP', index=False)
-        if len(df3) > 0: df3.to_excel(writer, sheet_name='3_ABSA_Labels', index=False)
+    # Simpan EXCEL terpisah agar lebih rapi untuk dianalisis
+    df1.to_excel('dataset/processed/coffee_shops.xlsx', index=False)
+    if len(df2) > 0: df2.to_excel('dataset/processed/reviews_clean.xlsx', index=False)
+    if len(df3) > 0: df3.to_excel('dataset/processed/absa_labels.xlsx', index=False)
     
     print(f"✅ DATASET SELESAI!")
+    print(f"📁 File CSV dan Excel (.xlsx) sudah tersimpan di folder 'dataset/processed/'")
     print(f"📊 Cafe: {len(df1)} | Review: {len(df2)} | ABSA Records: {len(df3)}")
 
 if __name__ == "__main__":
@@ -220,7 +211,7 @@ if __name__ == "__main__":
         "coffee shop depok sleman"
     ]
     
-    # Jalankan Scraper (Target: 1 Cafe, @ 10 Review per cafe)
-    print("\n⚠️ MENJALANKAN MODE PERCOBAAN (TESTING 1 CAFE)...")
-    c, r, a = run_research_scraper(queries, max_cafes=1, reviews_per_cafe=10)
+    # Jalankan Scraper (Target: 1 Cafe, @ 20 Review per cafe)
+    print("\n⚠️ MENJALANKAN MODE PERCOBAAN (TESTING 1 CAFE - 20 REVIEWS)...")
+    c, r, a = run_research_scraper(queries, max_cafes=1, reviews_per_cafe=20)
     save_research_dataset(c, r, a)
