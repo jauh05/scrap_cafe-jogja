@@ -4,6 +4,8 @@ import time
 import pandas as pd
 from datetime import datetime
 from playwright.sync_api import sync_playwright
+from playwright_stealth import stealth_sync
+import random
 
 # ==========================================
 # 1. SETUP STRUKTUR FOLDER PENELITIAN
@@ -46,16 +48,27 @@ def extract_absa_labels(review_text, review_id):
     return labels
 
 # ==========================================
-# 3. CORE SCRAPER ENGINE
+# 3. UTILS & CORE SCRAPER ENGINE
 # ==========================================
+def random_delay(min_s=2, max_s=5):
+    """Menambahkan jeda acak untuk meniru perilaku manusia"""
+    time.sleep(random.uniform(min_s, max_s))
+
 def run_research_scraper(queries, max_cafes=300, reviews_per_cafe=50):
     cafes_data, reviews_data, absa_data = [], [], []
     
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
         # Menggunakan locale en-US agar text selector (seperti "Reviews") konsisten tidak berubah bahasa
-        context = browser.new_context(viewport={'width': 1280, 'height': 800}, locale='en-US')
+        context = browser.new_context(
+            viewport={'width': 1280, 'height': 800}, 
+            locale='en-US',
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        )
         page = context.new_page()
+        
+        # AKTIFKAN STEALTH MODE
+        stealth_sync(page)
 
         cafe_count = 0
         for query in queries:
@@ -63,12 +76,12 @@ def run_research_scraper(queries, max_cafes=300, reviews_per_cafe=50):
             print(f"\n🔎 Melakukan Crawling Wilayah: {query}")
             search_url = f"https://www.google.com/maps/search/{query.replace(' ', '+')}?hl=en"
             page.goto(search_url)
-            page.wait_for_timeout(5000)
+            random_delay(5, 7)
 
-            # Scroll list hasil pencarian cafe
+            # Scroll list hasil pencarian cafe dengan cara yang lebih halus
             for _ in range(6): 
-                page.mouse.wheel(0, 5000)
-                page.wait_for_timeout(1500)
+                page.mouse.wheel(0, random.randint(3000, 5000))
+                random_delay(2, 4)
 
             cafe_links = page.locator('a[href*="/maps/place/"]').all()
             print(f"📍 Ditemukan {len(cafe_links)} potensi tempat dari query ini.")
@@ -78,7 +91,7 @@ def run_research_scraper(queries, max_cafes=300, reviews_per_cafe=50):
                 try:
                     # Klik cafe untuk buka panel detail
                     link.click()
-                    page.wait_for_timeout(3000)
+                    random_delay(3, 5)
                     
                     # 1. Scraping Master Data Cafe (TABLE 1)
                     name_el = page.locator('h1.DUwDvf').first
@@ -106,68 +119,98 @@ def run_research_scraper(queries, max_cafes=300, reviews_per_cafe=50):
                     
                     if review_tab.count() > 0:
                         review_tab.click()
-                        page.wait_for_timeout(5000)
+                        random_delay(4, 6)
                     else:
                         review_btn = page.locator('button[aria-label*="reviews"]').first
                         if review_btn.count() == 0:
                             review_btn = page.locator('button[aria-label*="ulasan"]').first
                         if review_btn.count() > 0:
                             review_btn.click()
-                            page.wait_for_timeout(3000)
+                            random_delay(3, 5)
                             
-                    # LOGIKA SCROLLING
-                    for _ in range(8): 
-                        reviews = page.locator('div[data-review-id]')
-                        if reviews.count() > 0:
-                            try:
-                                reviews.last.scroll_into_view_if_needed()
-                                page.wait_for_timeout(1500)
-                            except: pass
-                        else:
-                            page.mouse.move(300, 400) 
-                            page.mouse.wheel(0, 5000)
-                            page.wait_for_timeout(1000)
-                    
-                    # EKSTRAKSI REVIEW ITEM
-                    # Klik tombol "More" (class .w8nwRe.kyuRq sering digunakan Google Maps)
-                    more_btns = page.locator('button.w8nwRe.kyuRq').all() + page.locator('button:has-text("More")').all()
-                    for btn in more_btns:
-                        try: btn.click(); page.wait_for_timeout(300)
-                        except: pass
-
-                    raw_reviews = page.locator('div[data-review-id]').all()
-                    if not raw_reviews:
-                        raw_reviews = page.locator('.jftiEf').all()
-                        
+                    # LOGIKA SCROLLING & EKSTRAKSI REVIEW ITEM – ambil 20 review terbaru
                     extracted_this_cafe = 0
-                    for rev in raw_reviews:
-                        if extracted_this_cafe >= reviews_per_cafe: break
+                    seen_ids = set()
+                    max_attempts = 25
+                    attempts = 0
+                    
+                    while extracted_this_cafe < reviews_per_cafe and attempts < max_attempts:
+                        attempts += 1
                         
-                        rev_texts = rev.locator('.wiI7pd, .wi9C4c, .MyEned').all_inner_texts()
-                        rev_text_raw = max(rev_texts, key=len) if rev_texts else ""
-                        rev_text = " ".join(rev_text_raw.split())
-                        
-                        if len(rev_text) < 10: continue
-                        
-                        stars_el = rev.locator('span[role="img"]').first
-                        star_text = stars_el.get_attribute('aria-label') if stars_el.count() > 0 else ""
-                        user_rating = 5
-                        if star_text:
+                        # Klik tombol "More" / "Lainnya" untuk teks ulasan lengkap
+                        more_btns = page.locator('button.w8nwRe.kyuRq, button:has-text("More"), button:has-text("Lainnya")').all()
+                        for btn in more_btns:
                             try:
-                                user_rating = int(''.join(filter(str.isdigit, star_text.split()[0])))
-                            except: pass
+                                btn.click()
+                                page.wait_for_timeout(200)
+                            except:
+                                pass
                         
-                        rev_id = f"RV{len(reviews_data)+1:06d}"
-                        rev_entry = {
-                            "review_id": rev_id, "cafe_id": cafe_id, "review_text": rev_text,
-                            "review_rating": user_rating, "review_date": datetime.now().strftime("%Y-%m-%d"), "language": "id"
-                        }
-                        reviews_data.append(rev_entry)
-                        extracted_this_cafe += 1
+                        # Scroll ke bawah untuk memicu lazy loading ulasan baru
+                        reviews_els = page.locator('div[data-review-id]')
+                        if reviews_els.count() == 0:
+                            reviews_els = page.locator('.jftiEf')
+                            
+                        if reviews_els.count() > 0:
+                            try:
+                                reviews_els.last.scroll_into_view_if_needed()
+                            except:
+                                pass
+                        else:
+                            page.keyboard.press('PageDown')
+                            
+                        random_delay(1, 2)
                         
-                        absa_labels = extract_absa_labels(rev_text, rev_id)
-                        absa_data.extend(absa_labels)
-                        
+                        # Ambil elemen ulasan yang sudah tampil
+                        current_raw = page.locator('div[data-review-id]').all()
+                        if not current_raw:
+                            current_raw = page.locator('.jftiEf').all()
+                            
+                        for rev in current_raw:
+                            if extracted_this_cafe >= reviews_per_cafe:
+                                break
+                                
+                            rid = rev.get_attribute('data-review-id')
+                            if rid and rid in seen_ids:
+                                continue
+                            if rid:
+                                seen_ids.add(rid)
+                                
+                            # Ekstraksi Teks
+                            rev_texts = rev.locator('.wiI7pd, .wi9C4c, .MyEned').all_inner_texts()
+                            rev_text_raw = max(rev_texts, key=len) if rev_texts else ""
+                            rev_text = " ".join(rev_text_raw.split())
+                            
+                            if len(rev_text) < 10:
+                                continue
+                                
+                            # Ekstraksi Rating
+                            stars_el = rev.locator('span[role="img"]').first
+                            star_text = stars_el.get_attribute('aria-label') if stars_el.count() > 0 else ""
+                            user_rating = 5
+                            if star_text:
+                                try:
+                                    # Mengambil angka dari "5 stars" atau "Rating 5"
+                                    user_rating = int(''.join(filter(str.isdigit, star_text.split()[0])))
+                                except:
+                                    pass
+                                    
+                            # Simpan Data
+                            review_id_code = f"RV{len(reviews_data)+1:06d}"
+                            reviews_data.append({
+                                "review_id": review_id_code, 
+                                "cafe_id": cafe_id, 
+                                "review_text": rev_text,
+                                "review_rating": user_rating, 
+                                "review_date": datetime.now().strftime("%Y-%m-%d"), 
+                                "language": "id"
+                            })
+                            extracted_this_cafe += 1
+                            
+                            # Analisis ABSA
+                            absa_labels = extract_absa_labels(rev_text, review_id_code)
+                            absa_data.extend(absa_labels)
+
                     print(f"   => Terambil {extracted_this_cafe} review untuk cafe ini.")
 
                     cafe_count += 1
@@ -204,11 +247,48 @@ if __name__ == "__main__":
     
     # === MODE PERCOBAAN (TESTING 1 DATA) ===
     # Hanya menggunakan 1 kata kunci untuk testing
+    # Daftar kata kunci wilayah yang luas (lebih dari 30 kata) untuk mencapai target 600 kafe
     queries = [
-        "coffee shop depok sleman"
+        "coffee shop depok sleman",
+        "coffee shop ngaglik sleman",
+        "coffee shop mlati sleman",
+        "coffee shop umbulharjo yogyakarta",
+        "coffee shop gondokusuman yogyakarta",
+        "coffee shop mantrijeron yogyakarta",
+        "coffee shop sewon bantul",
+        "coffee shop kasihan bantul",
+        "coffee shop banguntapan bantul",
+        "cafe hits yogyakarta",
+        "specialty coffee jogja",
+        "roastery cafe yogyakarta",
+        "cafe estetik sleman",
+        "tempat nongkrong bantul",
+        "cafe alun-alun jogja",
+        "coffee shop kebon jeruk",
+        "cafe wisata kuliner jogja",
+        "kopi tradisional jogja",
+        "cozy cafe jogja",
+        "coffee shop kemalan",
+        "cafe mrican",
+        "artisan coffee jogja",
+        "cafe sunrise jogja",
+        "cafe sunset jogja",
+        "cafe pusat kota",
+        "cafe di dekat stasiun jogja",
+        "cafe dekat universitas",
+        "coffee shop near mall jogja",
+        "cafe di kawasan bisnis jogja",
+        "coffee shop daerah kebayoran jogja",
+        "cafe di area pemukiman jogja",
+        "cafe kuliner keluarga",
+        "cafe ramah anak jogja",
+        "cafe kopi susu jogja",
+        "cafe dengan wifi gratis",
+        "cafe 24 jam jogja",
+        "coffee shop brunch jogja"
     ]
     
-    # Jalankan Scraper (Target: 3 Cafe, @ 20 Review per cafe)
-    print("\n⚠️ MENJALANKAN MODE PERCOBAAN (TESTING 3 CAFE - 20 REVIEWS)...")
-    c, r, a = run_research_scraper(queries, max_cafes=3, reviews_per_cafe=20)
+    # Jalankan Scraper (Target: 600 Cafe, @ 20 Review per cafe)
+    print("\n⚠️ MENJALANKAN SCRAPING UNTUK 600 CAFÉ & 12.000 REVIEW...")
+    c, r, a = run_research_scraper(queries, max_cafes=600, reviews_per_cafe=20)
     save_research_dataset(c, r, a)
