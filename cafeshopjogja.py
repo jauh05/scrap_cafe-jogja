@@ -66,9 +66,8 @@ def run_research_scraper(queries, max_cafes=300, reviews_per_cafe=50):
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         )
         page = context.new_page()
-        
-        # AKTIFKAN STEALTH MODE
-        stealth_sync(page)
+        # AKTIFKAN STEALTH MODE (Matikan sementara jika blank)
+        # stealth_sync(page)
 
         cafe_count = 0
         for query in queries:
@@ -76,12 +75,24 @@ def run_research_scraper(queries, max_cafes=300, reviews_per_cafe=50):
             print(f"\n🔎 Melakukan Crawling Wilayah: {query}")
             search_url = f"https://www.google.com/maps/search/{query.replace(' ', '+')}?hl=en"
             page.goto(search_url)
-            random_delay(5, 7)
+            
+            # Tunggu elemen list muncul (biasanya elemen dengan role feed)
+            try:
+                page.wait_for_selector('div[role="feed"]', timeout=15000)
+            except:
+                print("⚠️ List belum muncul, mencoba menunggu lebih lama...")
+            
+            random_delay(3, 5)
 
             # Scroll list hasil pencarian cafe dengan cara yang lebih halus
-            for _ in range(6): 
-                page.mouse.wheel(0, random.randint(3000, 5000))
-                random_delay(2, 4)
+            for _ in range(5): 
+                # Pastikan fokus ada di area list sebelum scroll
+                try:
+                    page.hover('div[role="feed"]')
+                except:
+                    pass
+                page.mouse.wheel(0, random.randint(2000, 4000))
+                random_delay(2, 3)
 
             cafe_links = page.locator('a[href*="/maps/place/"]').all()
             print(f"📍 Ditemukan {len(cafe_links)} potensi tempat dari query ini.")
